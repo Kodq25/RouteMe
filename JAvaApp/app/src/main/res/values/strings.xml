@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MyApp</string>
+    <string name="home">Home</string>
+    <string name="route">Route</string>
+    <string name="menu">Menu</string>
+    <string name="current_location">Current Location</string>
+    <string name="current_location_hint">Tap the location button or type manually</string>
+    <string name="destination">Destination</string>
+    <string name="destination_hint">Where do you want to go?</string>
+    <string name="search">Search</string>
+    <string name="search_route">Search Route</string>
+    <string name="navigation">Navigation</string>
+    <string name="get_current_location">Get current location</string>
+    <string name="search_screen_title">Find Your Route</string>
+    <string name="search_screen_subtitle">Use your current location and destination to plan navigation.</string>
+    <string name="menu_screen_title">Menu</string>
+    <string name="menu_screen_subtitle">Choose an option below.</string>
+    <string name="map_screen_hint">Map view powered by OpenStreetMap tiles. Enable location permissions to see your position.</string>
+</resources>
