@@ -4,6 +4,7 @@
     <string name="home">Home</string>
     <string name="route">Route</string>
     <string name="menu">Menu</string>
+    <string name="history">History</string>
     <string name="current_location">Current Location</string>
     <string name="current_location_hint">Tap the location button or type manually</string>
     <string name="destination">Destination</string>
@@ -16,5 +17,21 @@
     <string name="search_screen_subtitle">Use your current location and destination to plan navigation.</string>
     <string name="menu_screen_title">Menu</string>
     <string name="menu_screen_subtitle">Choose an option below.</string>
+    <string name="history_screen_title">Search History</string>
+    <string name="history_screen_subtitle">Recent destinations saved on this device.</string>
+    <string name="history_empty_state">No searches yet.</string>
+    <string name="history_clear_all">Clear history</string>
+    <string name="history_clear_confirm_title">Clear search history?</string>
+    <string name="history_clear_confirm_message">This removes all saved searches on this device.</string>
+    <string name="history_cleared_toast">Search history cleared.</string>
+    <string name="history_delete_title">Delete search?</string>
+    <string name="history_delete_message">Remove this search from history?</string>
+    <string name="history_delete_action">Delete</string>
+    <string name="history_deleted_toast">Search removed.</string>
+    <string name="settings_screen_title">Settings</string>
+    <string name="settings_screen_subtitle">Control navigation preferences.</string>
+    <string name="settings_auto_reroute">Auto reroute to shorter paths</string>
+    <string name="settings_clear_history">Clear search history</string>
+    <string name="settings_app_version">App version: %1$s</string>
     <string name="map_screen_hint">Map view powered by OpenStreetMap tiles. Enable location permissions to see your position.</string>
 </resources>

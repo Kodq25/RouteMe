@@ -16,7 +16,7 @@ import com.example.myapp.R;
 
 public class MenuFragment extends Fragment {
 
-    private static final String[] MENU_ITEMS = {"Profile", "Settings", "Help"};
+    private static final String[] MENU_ITEMS = {"History", "Settings", "Help"};
 
     public MenuFragment() {
         super(R.layout.fragment_menu);
@@ -39,7 +39,21 @@ public class MenuFragment extends Fragment {
                 MENU_ITEMS
         );
         menuList.setAdapter(adapter);
-        menuList.setOnItemClickListener((parent, itemView, position, id) ->
-                Toast.makeText(requireContext(), MENU_ITEMS[position], Toast.LENGTH_SHORT).show());
+        menuList.setOnItemClickListener((parent, itemView, position, id) -> {
+            String item = MENU_ITEMS[position];
+            if ("History".equals(item)) {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).navigateToHistory();
+                }
+                return;
+            }
+            if ("Settings".equals(item)) {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).navigateToSettings();
+                }
+                return;
+            }
+            Toast.makeText(requireContext(), item, Toast.LENGTH_SHORT).show();
+        });
     }
 }

@@ -30,6 +30,7 @@ import com.example.myapp.repository.LocationUpdateRepo;
 import com.example.myapp.repository.NavigationSessionRepo;
 import com.example.myapp.repository.PlaceRepo;
 import com.example.myapp.repository.RouteRepo;
+import com.example.myapp.storage.SettingsStore;
 import com.google.android.gms.location.FusedLocationProviderClient;
 import com.google.android.gms.location.LocationCallback;
 import com.google.android.gms.location.LocationRequest;
@@ -71,6 +72,11 @@ public class MapViewModel extends AndroidViewModel {
     private static final String PLATFORM_ANDROID = "android";
     private static final String DEFAULT_ORIGIN_LABEL = "Origin";
     private static final String DEFAULT_DESTINATION_LABEL = "Destination";
+    private static final long REROUTE_MIN_INTERVAL_MS = 20000L;
+    private static final float REROUTE_MIN_DISTANCE_METERS = 40f;
+    private static final float OFF_ROUTE_THRESHOLD_METERS = 50f;
+    private static final double SHORTER_DISTANCE_DELTA_METERS = 50.0;
+    private static final double SHORTER_DISTANCE_RATIO = 0.97;
 
     private final Context appContext;
     private final FusedLocationProviderClient fusedLocationClient;
@@ -78,6 +84,7 @@ public class MapViewModel extends AndroidViewModel {
     private final MutableLiveData<List<GeoPoint>> routePoints = new MutableLiveData<>();
     private final MutableLiveData<List<PlaceModel>> sharedPlaces =
             new MutableLiveData<>(Collections.emptyList());
+    private final MutableLiveData<String> pendingDestinationQuery = new MutableLiveData<>();
     private final MutableLiveData<DeviceModel> currentDevice = new MutableLiveData<>();
     private final LocationCallback locationCallback;
     private final ExecutorService routingExecutor = Executors.newSingleThreadExecutor();
@@ -89,6 +96,12 @@ public class MapViewModel extends AndroidViewModel {
     private String activeSessionId;
     private ListenerRegistration sharedPlacesListener;
     private List<GeoPoint> fullRoutePoints = Collections.emptyList();
+    private GeoPoint lastRouteDestination;
+    private Double lastRouteDistanceMeters;
+    private Location lastRerouteLocation;
+    private long lastRouteRequestMs;
+    private final Object routeLock = new Object();
+    private boolean routeRequestInFlight = false;
 
     public MapViewModel(@NonNull Application application) {
         super(application);
@@ -107,6 +120,7 @@ public class MapViewModel extends AndroidViewModel {
                     currentLocation.postValue(latest);
                     persistLocationUpdateIfActive(latest);
                     updateRemainingRoutePoints(latest);
+                    maybeReroute(latest);
                 }
             }
         };
@@ -126,6 +140,21 @@ public class MapViewModel extends AndroidViewModel {
 
     public LiveData<List<PlaceModel>> getSharedPlaces() {
         return sharedPlaces;
+    }
+
+    public LiveData<String> getPendingDestinationQuery() {
+        return pendingDestinationQuery;
+    }
+
+    public void setPendingDestinationQuery(@NonNull String query) {
+        String trimmed = query.trim();
+        if (!trimmed.isEmpty()) {
+            pendingDestinationQuery.setValue(trimmed);
+        }
+    }
+
+    public void clearPendingDestinationQuery() {
+        pendingDestinationQuery.setValue(null);
     }
 
     public void initDevice() {
@@ -239,18 +268,8 @@ public class MapViewModel extends AndroidViewModel {
     }
 
     public void requestRoute(@NonNull GeoPoint origin, @NonNull GeoPoint destination) {
-        routingExecutor.execute(() -> {
-            try {
-                RouteResult result = fetchRouteResult(origin, destination);
-                fullRoutePoints = new ArrayList<>(result.points);
-                updateRemainingRoutePoints(currentLocation.getValue());
-                if (!result.points.isEmpty()) {
-                    saveRouteAndSession(origin, destination, result);
-                }
-            } catch (IOException | JSONException ignored) {
-                routePoints.postValue(new ArrayList<>());
-            }
-        });
+        lastRouteDestination = destination;
+        requestRouteInternal(origin, destination, true, currentLocation.getValue());
     }
 
     public boolean isGpsEnabled() {
@@ -294,7 +313,7 @@ public class MapViewModel extends AndroidViewModel {
             throws IOException, JSONException {
         String url = String.format(
                 Locale.US,
-                "https://router.project-osrm.org/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson",
+                "https://router.project-osrm.org/route/v1/driving/%f,%f;%f,%f?overview=full&geometries=geojson&alternatives=true",
                 origin.getLongitude(),
                 origin.getLatitude(),
                 destination.getLongitude(),
@@ -313,8 +332,21 @@ public class MapViewModel extends AndroidViewModel {
             if (routes == null || routes.length() == 0) {
                 return new RouteResult(Collections.emptyList(), null, null, null);
             }
-            JSONObject route = routes.getJSONObject(0);
-            JSONObject geometry = route.getJSONObject("geometry");
+            JSONObject bestRoute = routes.getJSONObject(0);
+            double bestDistance = bestRoute.has("distance")
+                    ? bestRoute.getDouble("distance")
+                    : Double.MAX_VALUE;
+            for (int i = 1; i < routes.length(); i++) {
+                JSONObject candidate = routes.getJSONObject(i);
+                double distance = candidate.has("distance")
+                        ? candidate.getDouble("distance")
+                        : Double.MAX_VALUE;
+                if (distance < bestDistance) {
+                    bestDistance = distance;
+                    bestRoute = candidate;
+                }
+            }
+            JSONObject geometry = bestRoute.getJSONObject("geometry");
             JSONArray coordinates = geometry.getJSONArray("coordinates");
             List<GeoPoint> points = new ArrayList<>(coordinates.length());
             for (int i = 0; i < coordinates.length(); i++) {
@@ -323,8 +355,8 @@ public class MapViewModel extends AndroidViewModel {
                 double lat = coord.getDouble(1);
                 points.add(new GeoPoint(lat, lon));
             }
-            Double distanceMeters = route.has("distance") ? route.getDouble("distance") : null;
-            Long durationSeconds = route.has("duration") ? Math.round(route.getDouble("duration")) : null;
+            Double distanceMeters = bestRoute.has("distance") ? bestRoute.getDouble("distance") : null;
+            Long durationSeconds = bestRoute.has("duration") ? Math.round(bestRoute.getDouble("duration")) : null;
             String geometryJson = geometry.toString();
             return new RouteResult(points, distanceMeters, durationSeconds, geometryJson);
         } finally {
@@ -393,6 +425,133 @@ public class MapViewModel extends AndroidViewModel {
             return;
         }
         routePoints.postValue(new ArrayList<>(points.subList(closestIndex, points.size())));
+    }
+
+    private void maybeReroute(@NonNull Location location) {
+        if (!SettingsStore.isAutoRerouteEnabled(appContext)) {
+            return;
+        }
+        GeoPoint destination = lastRouteDestination;
+        if (destination == null) {
+            return;
+        }
+        if (fullRoutePoints.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastRouteRequestMs < REROUTE_MIN_INTERVAL_MS) {
+            return;
+        }
+        if (lastRerouteLocation != null
+                && lastRerouteLocation.distanceTo(location) < REROUTE_MIN_DISTANCE_METERS) {
+            return;
+        }
+        if (!beginRouteRequest()) {
+            return;
+        }
+        lastRerouteLocation = new Location(location);
+        lastRouteRequestMs = now;
+        GeoPoint origin = new GeoPoint(location.getLatitude(), location.getLongitude());
+        routingExecutor.execute(() -> {
+            try {
+                RouteResult result = fetchRouteResult(origin, destination);
+                if (result.points.isEmpty()) {
+                    return;
+                }
+                boolean offRoute = distanceToRoute(location, fullRoutePoints) > OFF_ROUTE_THRESHOLD_METERS;
+                boolean shorter = isShorter(result.distanceMeters, lastRouteDistanceMeters);
+                if (offRoute || shorter) {
+                    fullRoutePoints = new ArrayList<>(result.points);
+                    lastRouteDistanceMeters = result.distanceMeters;
+                    updateRemainingRoutePoints(location);
+                }
+            } catch (IOException | JSONException ignored) {
+                // Ignore reroute failures.
+            } finally {
+                endRouteRequest();
+            }
+        });
+    }
+
+    private void requestRouteInternal(@NonNull GeoPoint origin,
+                                      @NonNull GeoPoint destination,
+                                      boolean persist,
+                                      @Nullable Location location) {
+        if (!beginRouteRequest()) {
+            return;
+        }
+        lastRouteRequestMs = System.currentTimeMillis();
+        routingExecutor.execute(() -> {
+            try {
+                RouteResult result = fetchRouteResult(origin, destination);
+                if (result.points.isEmpty()) {
+                    clearRouteState();
+                    routePoints.postValue(Collections.emptyList());
+                    return;
+                }
+                fullRoutePoints = new ArrayList<>(result.points);
+                lastRouteDistanceMeters = result.distanceMeters;
+                updateRemainingRoutePoints(location);
+                if (persist) {
+                    saveRouteAndSession(origin, destination, result);
+                }
+            } catch (IOException | JSONException ignored) {
+                clearRouteState();
+                routePoints.postValue(Collections.emptyList());
+            } finally {
+                endRouteRequest();
+            }
+        });
+    }
+
+    private boolean beginRouteRequest() {
+        synchronized (routeLock) {
+            if (routeRequestInFlight) {
+                return false;
+            }
+            routeRequestInFlight = true;
+            return true;
+        }
+    }
+
+    private void endRouteRequest() {
+        synchronized (routeLock) {
+            routeRequestInFlight = false;
+        }
+    }
+
+    private double distanceToRoute(@NonNull Location location, @NonNull List<GeoPoint> points) {
+        int closestIndex = findClosestPointIndex(location, points);
+        if (closestIndex < 0 || closestIndex >= points.size()) {
+            return Double.MAX_VALUE;
+        }
+        GeoPoint point = points.get(closestIndex);
+        float[] results = new float[1];
+        Location.distanceBetween(
+                location.getLatitude(),
+                location.getLongitude(),
+                point.getLatitude(),
+                point.getLongitude(),
+                results);
+        return results[0];
+    }
+
+    private boolean isShorter(@Nullable Double candidateDistance, @Nullable Double currentDistance) {
+        if (candidateDistance == null) {
+            return false;
+        }
+        if (currentDistance == null) {
+            return true;
+        }
+        if (candidateDistance < (currentDistance - SHORTER_DISTANCE_DELTA_METERS)) {
+            return true;
+        }
+        return candidateDistance <= (currentDistance * SHORTER_DISTANCE_RATIO);
+    }
+
+    private void clearRouteState() {
+        fullRoutePoints = Collections.emptyList();
+        lastRouteDistanceMeters = null;
     }
 
     private int findClosestPointIndex(@NonNull Location location, @NonNull List<GeoPoint> points) {

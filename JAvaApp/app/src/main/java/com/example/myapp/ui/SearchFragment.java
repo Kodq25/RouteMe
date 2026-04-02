@@ -22,6 +22,7 @@ import androidx.lifecycle.ViewModelProvider;
 
 import com.example.myapp.viewmodel.MapViewModel;
 import com.example.myapp.R;
+import com.example.myapp.storage.SearchHistoryStore;
 
 import org.osmdroid.util.GeoPoint;
 import org.json.JSONArray;
@@ -44,10 +45,15 @@ import java.util.concurrent.Executors;
 
 public class SearchFragment extends Fragment {
 
+    private static final long ADDRESS_RESOLVE_INTERVAL_MS = 15000L;
+    private static final float ADDRESS_RESOLVE_DISTANCE_METERS = 50f;
+
     private MapViewModel viewModel;
     private EditText currentLocationInput;
     private EditText destinationInput;
     private Location lastLocation;
+    private Location lastAddressLocation;
+    private long lastAddressResolveMs;
     private final ExecutorService geocodeExecutor = Executors.newSingleThreadExecutor();
 
     public SearchFragment() {
@@ -76,7 +82,19 @@ public class SearchFragment extends Fragment {
                 return;
             }
             lastLocation = location;
-            resolveAddress(location, this::updateCurrentLocationText);
+            if (shouldResolveAddress(location)) {
+                resolveAddress(location, this::updateCurrentLocationText);
+            }
+        });
+
+        viewModel.getPendingDestinationQuery().observe(getViewLifecycleOwner(), query -> {
+            if (query == null || query.trim().isEmpty()) {
+                return;
+            }
+            if (destinationInput != null) {
+                destinationInput.setText(query);
+            }
+            viewModel.clearPendingDestinationQuery();
         });
 
         currentLocationButton.setOnClickListener(v -> viewModel.startLocationUpdates());
@@ -109,21 +127,37 @@ public class SearchFragment extends Fragment {
             return;
         }
 
-        try {
-            List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
-            callback.accept(extractAddress(addresses));
-        } catch (IOException ignored) {
-            // Keep user-facing behavior consistent with the original code.
-            callback.accept("Location not found");
-        }
+        geocodeExecutor.execute(() -> {
+            try {
+                List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
+                callback.accept(extractAddress(addresses));
+            } catch (IOException ignored) {
+                // Keep user-facing behavior consistent with the original code.
+                callback.accept("Location not found");
+            }
+        });
     }
 
     @NonNull
     private String extractAddress(@Nullable List<Address> addresses) {
         if (addresses != null && !addresses.isEmpty()) {
-            String line = addresses.get(0).getAddressLine(0);
+            Address address = addresses.get(0);
+
+            String line = address.getAddressLine(0);
             if (line != null && !line.isEmpty()) {
                 return line;
+            }
+
+            if (address.getLocality() != null) {
+                return address.getLocality();
+            }
+
+            if (address.getAdminArea() != null) {
+                return address.getAdminArea();
+            }
+
+            if (address.getCountryName() != null) {
+                return address.getCountryName();
             }
         }
         return "Location not found";
@@ -144,6 +178,8 @@ public class SearchFragment extends Fragment {
             showToast("Current location is not available yet.");
             return;
         }
+
+        SearchHistoryStore.recordQuery(requireContext(), destinationText);
 
         GeoPoint origin = new GeoPoint(lastLocation.getLatitude(), lastLocation.getLongitude());
         GeoPoint directPoint = parseLatLon(destinationText);
@@ -313,5 +349,24 @@ public class SearchFragment extends Fragment {
         currentLocationInput = null;
         destinationInput = null;
         lastLocation = null;
+        lastAddressLocation = null;
+        lastAddressResolveMs = 0L;
+    }
+
+    private boolean shouldResolveAddress(@NonNull Location location) {
+        long now = System.currentTimeMillis();
+        if (lastAddressLocation == null) {
+            lastAddressLocation = new Location(location);
+            lastAddressResolveMs = now;
+            return true;
+        }
+        float distance = location.distanceTo(lastAddressLocation);
+        if (distance < ADDRESS_RESOLVE_DISTANCE_METERS
+                && (now - lastAddressResolveMs) < ADDRESS_RESOLVE_INTERVAL_MS) {
+            return false;
+        }
+        lastAddressLocation.set(location);
+        lastAddressResolveMs = now;
+        return true;
     }
 }

@@ -53,3 +53,5 @@ secrets.properties
 
 ### Firebase ###
 **/google-services.json
+/.stakpak/data/local.db
+/.stakpak/

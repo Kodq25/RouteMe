@@ -92,6 +92,23 @@ public class MainActivity extends AppCompatActivity{
         switchTo(new MapFragment());
     }
 
+    public void navigateToHome() {
+        BottomNavigationView bottomNavigation = findViewById(R.id.bottom_navigation);
+        if (bottomNavigation != null) {
+            bottomNavigation.setSelectedItemId(R.id.nav_home);
+            return;
+        }
+        switchTo(new SearchFragment());
+    }
+
+    public void navigateToHistory() {
+        switchTo(new HistoryFragment());
+    }
+
+    public void navigateToSettings() {
+        switchTo(new SettingsFragment());
+    }
+
     private void switchTo(@NonNull androidx.fragment.app.Fragment fragment) {
         getSupportFragmentManager()
                 .beginTransaction()
