@@ -7,14 +7,15 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.hardware.display.DisplayManager;
 import android.location.Location;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.view.Display;
 import android.view.LayoutInflater;
 import android.view.Surface;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.WindowManager;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -255,8 +256,8 @@ public class MapFragment extends Fragment {
 
         routeLine = new Polyline();
         routeLine.setPoints(points);
-        routeLine.setColor(Color.parseColor("#00C853"));
-        routeLine.setWidth(10f);
+        routeLine.getOutlinePaint().setColor(Color.parseColor("#00C853"));
+        routeLine.getOutlinePaint().setStrokeWidth(10f);
         mapView.getOverlays().add(0, routeLine);
 
         GeoPoint destination = points.get(points.size() - 1);
@@ -274,7 +275,13 @@ public class MapFragment extends Fragment {
         if (allowAutoFit && !autoFitDone) {
             BoundingBox box = buildBoundingBox(points);
             if (box != null) {
-                mapView.zoomToBoundingBox(box, true, 64);
+                // Delay auto-fit until layout is ready after configuration changes.
+                mapView.post(() -> {
+                    if (mapView != null) {
+                        mapView.zoomToBoundingBox(box, true, 64);
+                        mapView.invalidate();
+                    }
+                });
                 autoFitDone = true;
             }
         }
@@ -438,12 +445,16 @@ public class MapFragment extends Fragment {
     }
 
     private int getDisplayRotation() {
-        WindowManager windowManager =
-                (WindowManager) requireContext().getSystemService(Context.WINDOW_SERVICE);
-        if (windowManager == null) {
+        DisplayManager displayManager =
+                (DisplayManager) requireContext().getSystemService(Context.DISPLAY_SERVICE);
+        if (displayManager == null) {
             return Surface.ROTATION_0;
         }
-        return windowManager.getDefaultDisplay().getRotation();
+        Display display = displayManager.getDisplay(Display.DEFAULT_DISPLAY);
+        if (display == null) {
+            return Surface.ROTATION_0;
+        }
+        return display.getRotation();
     }
 
     private void updateFromRotationVector(float[] values) {

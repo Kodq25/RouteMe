@@ -193,6 +193,7 @@ public class SearchFragment extends Fragment {
         });
     }
 
+    @SuppressWarnings("deprecation")
     private void resolveDestination(@NonNull String query, @NonNull Consumer<GeoPoint> callback) {
         Geocoder geocoder = new Geocoder(requireContext(), Locale.getDefault());
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
