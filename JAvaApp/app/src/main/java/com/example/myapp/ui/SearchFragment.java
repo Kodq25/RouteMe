@@ -73,7 +73,9 @@ public class SearchFragment extends Fragment {
                 return;
             }
             lastLocation = location;
-            if (shouldResolveAddress(location)) {
+            boolean isCurrentLocationEmpty = currentLocationInput == null
+                    || currentLocationInput.getText().toString().trim().isEmpty();
+            if (isCurrentLocationEmpty || shouldResolveAddress(location)) {
                 resolveAddress(location, this::updateCurrentLocationText);
             }
         });
@@ -107,12 +109,17 @@ public class SearchFragment extends Fragment {
             geocoder.getFromLocation(latitude, longitude, 1, new Geocoder.GeocodeListener() {
                 @Override
                 public void onGeocode(@NonNull List<Address> addresses) {
-                    callback.accept(extractAddress(addresses));
+                    String address = extractAddress(addresses);
+                    if (address != null) {
+                        callback.accept(address);
+                    } else {
+                        callback.accept(getString(R.string.current_location_unavailable));
+                    }
                 }
 
                 @Override
                 public void onError(@NonNull String errorMessage) {
-                    callback.accept("Location not found");
+                    callback.accept(getString(R.string.current_location_unavailable));
                 }
             });
             return;
@@ -121,15 +128,19 @@ public class SearchFragment extends Fragment {
         geocodeExecutor.execute(() -> {
             try {
                 List<Address> addresses = geocoder.getFromLocation(latitude, longitude, 1);
-                callback.accept(extractAddress(addresses));
+                String address = extractAddress(addresses);
+                if (address != null) {
+                    callback.accept(address);
+                } else {
+                    callback.accept(getString(R.string.current_location_unavailable));
+                }
             } catch (IOException ignored) {
-                // Keep user-facing behavior consistent with the original code.
-                callback.accept("Location not found");
+                callback.accept(getString(R.string.current_location_unavailable));
             }
         });
     }
 
-    @NonNull
+    @Nullable
     private String extractAddress(@Nullable List<Address> addresses) {
         if (addresses != null && !addresses.isEmpty()) {
             Address address = addresses.get(0);
@@ -151,7 +162,7 @@ public class SearchFragment extends Fragment {
                 return address.getCountryName();
             }
         }
-        return "Location not found";
+        return null;
     }
 
     private void requestRouteForDestination() {

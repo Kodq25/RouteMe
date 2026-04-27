@@ -8,6 +8,7 @@
     <string name="history">History</string>
     <string name="current_location">Current Location</string>
     <string name="current_location_hint">Tap the location button or type manually</string>
+    <string name="current_location_unavailable">Current location unavailable</string>
     <string name="destination">Destination</string>
     <string name="destination_hint">Where do you want to go?</string>
     <string name="search">Search</string>

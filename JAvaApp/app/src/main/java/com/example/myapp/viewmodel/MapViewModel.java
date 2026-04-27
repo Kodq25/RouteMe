@@ -466,7 +466,6 @@ public class MapViewModel extends AndroidViewModel {
                     updateRemainingRoutePoints(location);
                 }
             } catch (IOException | JSONException ignored) {
-                // Ignore reroute failures.
             } finally {
                 endRouteRequest();
             }
